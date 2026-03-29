@@ -2,7 +2,7 @@
 
 **Automated chocobo digging**
 
-DigSkill handles the full digging loop of sending dig commands, moving between spots, tracking your daily fatigue, managing your inventory, and warping you home when you're done. Bring plenty of greens, set it up once and let it run.
+DigSkill handles the full digging loop of sending dig commands, moving between spots, tracking your daily fatigue, managing your inventory, and warping you home when you're done. Bring plenty of greens, set it up once and let it run. Please note this addon is still in beta and may contain bugs. I created this for the recent digging campaigns and haven't fully tested everything yet. 
 
 ---
 
