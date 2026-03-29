@@ -1,11 +1,11 @@
-# ⚔️ Phayde's Windower Addons
+# Phayde's Windower Addons
 
 > **Quality-of-life addons for Final Fantasy XI, built for the 2026 endgame meta.**
 > Developed and maintained by **Phayde** on the [Windower](https://windower.net) platform.
 
 ---
 
-## 🚀 Installation
+##  Installation
 
 1. Download the folder for the addon you want
 2. Drop it into your `Windower/addons/` directory
@@ -15,7 +15,7 @@ Each addon folder contains its own `README.md` with full command documentation a
 
 ---
 
-## 📋 Notes
+##  Notes
 
 - All addons are built for **Windower 4** on the current retail FFXI client
 - Settings are saved automatically and persist across sessions
