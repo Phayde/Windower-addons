@@ -1,0 +1,29 @@
+<?xml version="1.1" ?>
+<settings>
+    <global>
+        <active>true</active>
+        <blacklist />
+        <debug_mode>false</debug_mode>
+        <greylist />
+        <hp_threshold>0</hp_threshold>
+        <limbus_autostop>false</limbus_autostop>
+        <limbus_autostop_cooldown>3</limbus_autostop_cooldown>
+        <limbus_pause_seconds>6</limbus_pause_seconds>
+        <list_bias_yalms>8</list_bias_yalms>
+        <manual_first_target>false</manual_first_target>
+        <max_distance>25</max_distance>
+        <retarget_max>2</retarget_max>
+        <retarget_window>2</retarget_window>
+        <segfarm>true</segfarm>
+        <statues_first>false</statues_first>
+        <switch_hysteresis>2</switch_hysteresis>
+        <target_non_aggro>false</target_non_aggro>
+        <whitelist />
+    </global>
+    <phayde>
+        <greylist>sahagin,ghrah,unseelie,slime,shadow,adamantoise,wyvern,agon</greylist>
+        <hp_threshold>90</hp_threshold>
+        <manual_first_target>true</manual_first_target>
+        <whitelist>orc,yagudo,goblin,moblin,weapon,bomb,golem,gigas,snoll,aern,cluster,doomed,hound,hecteyes,leech,ahriman,demon,taurus,gargouille,wasp,damselfly,gnat,ladybug,bat,marid,coeurl,sheep,rarab,soulflayer,ram</whitelist>
+    </phayde>
+</settings>
