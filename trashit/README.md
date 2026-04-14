@@ -8,7 +8,7 @@
 
 ## Overview
 
-I was tried of the Mog Gardening grind clogging my inventory with worthless items. **Trash It** solves this: flip it on before you collect, and every new item that lands in your inventory gets automatically discarded. A bold on-screen indicator stays visible the entire time so you never forget it's running.
+I was tired of the Mog Gardening grind clogging my inventory with worthless items. **Trash It** solves this: flip it on before you collect, and every new item that lands in your inventory gets automatically discarded. A bold on-screen indicator stays visible the entire time so you never forget it's running.
 
 ---
 
