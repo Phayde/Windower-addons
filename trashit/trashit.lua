@@ -14,9 +14,10 @@
     - An inventory snapshot is taken the moment you activate the addon.
     - Only items that appear AFTER activation are eligible for discard.
     - If you already own any quantity of an item when you activate, that item
-      will NEVER be touched, even if you pick up another one.
-    - Drops are always quantity 1, never the full stack.
-    - A whitelist lets you protect additional items you want to keep.
+      will NEVER be touched - even if you pick up another one.
+    - Drops only the exact number of units that exceed your pre-activation count.
+    - A whitelist lets you protect items by keyword: "mythril ore" protects
+      any item whose name contains that phrase.
 
   SETUP:
     1. Place trashit.lua in: Windower/addons/trashit/
@@ -55,8 +56,9 @@ local res_items = require('resources').items
 -- ============================================================================
 
 local defaults = {
-    -- Comma-separated list of item names to always keep, even when active.
-    -- Names are case-insensitive. Exact match only, no partial matching.
+    -- Comma-separated list of terms to always keep, even when active.
+    -- Matching is case-insensitive substring: "bayld" protects
+    -- "Pinch of High-Purity Bayld", etc.
     whitelist = '',
 }
 
@@ -76,6 +78,11 @@ local snapshot  = {}
 
 -- Parsed whitelist: { [item_name_lowercase] = true }
 local whitelist = {}
+
+-- True when a sweep coroutine is already scheduled and waiting to fire.
+-- Prevents stacking multiple redundant sweeps when several "Obtained"
+-- messages arrive within the same 0.5s window.
+local sweep_scheduled = false
 
 -- ============================================================================
 --  HUD (on-screen display)
@@ -165,6 +172,17 @@ local function save_whitelist()
     config.save(settings)
 end
 
+-- Returns true if item_name (lowercase) contains any whitelist entry
+-- as a substring. "mythril ore" will match "chunk of mythril ore", etc.
+local function is_whitelisted(name_lower)
+    for term in pairs(whitelist) do
+        if name_lower:find(term, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
 -- ============================================================================
 --  INVENTORY SNAPSHOT
 -- ============================================================================
@@ -187,31 +205,42 @@ end
 --  ITEM DROP LOGIC
 -- ============================================================================
 
-local function try_drop_one(item_name)
-    local name_lower   = item_name:lower()
-    local pre_existing = snapshot[name_lower] or 0
-    local inventory    = windower.ffxi.get_items(0)
-
-    dlog(('try_drop_one: "%s" | snapshot count=%d'):format(item_name, pre_existing))
+-- Walks every slot in main inventory and drops any units of any item that
+-- exceed the snapshot baseline, subject to whitelist protection.
+-- Called via a 0.5s delayed coroutine so the auto-sorter has time to settle
+-- before we scan. Because it checks the whole inventory in one pass, it
+-- catches all new items regardless of how many arrived simultaneously.
+local function sweep_and_drop()
+    sweep_scheduled = false
+    local inventory = windower.ffxi.get_items(0)
+    dlog('Sweep firing...')
 
     for index, item in pairs(inventory) do
         if type(index) == 'number' and type(item) == 'table'
         and item.id and item.id ~= 0 and item.status == 0 then
             local res = res_items[item.id]
-            if res and res.name:lower() == name_lower then
+            if res then
+                local name_lower    = res.name:lower()
+                local pre_existing  = snapshot[name_lower] or 0
                 local current_count = item.count or 1
-                dlog(('  slot %d: count=%d vs snapshot=%d'):format(index, current_count, pre_existing))
-                if current_count > pre_existing then
-                    dlog(('  -> dropping 1x "%s" from slot %d'):format(item_name, index))
-                    windower.ffxi.drop_item(index, 1)
-                    return
-                else
-                    dlog(('  -> count not > snapshot, skipping slot %d'):format(index))
+                local to_drop       = math.max(current_count - pre_existing, 0)
+
+                -- Skip if nothing new in this slot
+                if to_drop > 0 then
+                    -- Whitelist check - never drop protected items
+                    if is_whitelisted(name_lower) then
+                        dlog(('  slot %d: "%s" +%d new but whitelisted - keeping.'):format(
+                            index, res.name, to_drop))
+                    else
+                        dlog(('  slot %d: "%s" current=%d snapshot=%d - dropping %d'):format(
+                            index, res.name, current_count, pre_existing, to_drop))
+                        windower.ffxi.drop_item(index, to_drop)
+                    end
                 end
             end
         end
     end
-    dlog(('try_drop_one: no eligible slot found for "%s" - item kept.'):format(item_name))
+    dlog('Sweep complete.')
 end
 
 -- ============================================================================
@@ -237,8 +266,9 @@ local function deactivate()
         cprint(COLOR.info, 'Already inactive.')
         return
     end
-    active   = false
-    snapshot = {}
+    active          = false
+    snapshot        = {}
+    sweep_scheduled = false
     hud_hide()
     cprint(COLOR.success, 'Deactivated. Items will no longer be discarded.')
 end
@@ -248,8 +278,9 @@ end
 -- ============================================================================
 --
 -- FFXI prints "Obtained: <Item Name>." whenever an item lands in inventory.
--- The chat mode varies by acquisition method; the text pattern is the only gate.
--- Debug mode will print the mode in case there are issues to track down
+-- The chat mode varies by acquisition method - mode 4 for digging, but
+-- gardening and fishing may use a different mode number. We no longer filter
+-- by mode; the text pattern is the only gate. Debug mode will print the mode
 -- number of every match so you can confirm all acquisition types are caught.
 
 windower.register_event('incoming text', function(original, modified, original_mode)
@@ -263,28 +294,27 @@ windower.register_event('incoming text', function(original, modified, original_m
     -- DEBUG: always print matches when debug mode is on
     dlog(('Obtained match | mode=%d | item="%s"'):format(original_mode, item_name))
 
-    local name_lower = item_name:lower()
-
-    -- Whitelist check: keep this item if the player added it
-    if whitelist[name_lower] then
+    -- Whitelist check: if this item is protected, no sweep needed unless
+    -- other non-whitelisted items also arrived in the same batch.
+    -- The sweep itself also enforces the whitelist, but skipping here avoids
+    -- scheduling a sweep that would do nothing when only kept items are obtained.
+    if is_whitelisted(item_name:lower()) then
         dlog(('"%s" is whitelisted - keeping.'):format(item_name))
         return
     end
 
-    -- Safety check: if the player already had ANY of this item before
-    -- activation, leave it alone entirely. The per-slot count comparison
-    -- happens inside try_drop_one after the auto-sorter delay.
-    if snapshot[name_lower] and snapshot[name_lower] > 0 then
-        dlog(('"%s" was in snapshot (count=%d) - skipping.'):format(item_name, snapshot[name_lower]))
-        return
+    -- Schedule a sweep if one is not already pending. Any additional "Obtained"
+    -- messages that arrive within the 0.5s window are covered automatically
+    -- when the single sweep fires and checks the whole inventory at once.
+    if not sweep_scheduled then
+        sweep_scheduled = true
+        dlog('Sweep scheduled in 0.5s...')
+        coroutine.schedule(function()
+            sweep_and_drop()
+        end, 0.5)
+    else
+        dlog('Sweep already pending - no new coroutine needed.')
     end
-
-    dlog(('Scheduling drop of "%s" in 0.5s...'):format(item_name))
-
-    -- Give the auto-sorter a moment to move the item to its final slot
-    coroutine.schedule(function()
-        try_drop_one(item_name)
-    end, 0.5)
 end)
 
 -- ============================================================================
@@ -375,14 +405,14 @@ windower.register_event('addon command', function(cmd, ...)
         windower.add_to_chat(COLOR.info, '  //trash on              - Activate and begin discarding new items')
         windower.add_to_chat(COLOR.info, '  //trash off             - Deactivate: stop discarding items')
         windower.add_to_chat(COLOR.info, '  //trash                 - Toggle on/off')
-        windower.add_to_chat(COLOR.info, '  //trash keep <item>     - Add item to whitelist (exact name)')
+        windower.add_to_chat(COLOR.info, '  //trash keep <term>     - Add term to whitelist (substring match, case-insensitive)')
         windower.add_to_chat(COLOR.info, '  //trash remove <item>   - Remove item from whitelist')
         windower.add_to_chat(COLOR.info, '  //trash list            - Show whitelist')
         windower.add_to_chat(COLOR.info, '  //trash status          - Show current state and snapshot info')
         windower.add_to_chat(COLOR.info, '  //trash debug           - Toggle verbose debug output')
         windower.add_to_chat(COLOR.info, '  //trash help            - Show this help text')
         windower.add_to_chat(COLOR.info, 'SAFETY: Items already in inventory at activation are never touched.')
-        windower.add_to_chat(COLOR.info, 'Only 1 unit is ever dropped per obtained message, never a full stack.')
+        windower.add_to_chat(COLOR.info, 'Only newly acquired units are dropped - pre-existing stacks are never touched.')
 
     else
         cprint(COLOR.warn, 'Unknown command "' .. cmd .. '". Use //trash help.')
