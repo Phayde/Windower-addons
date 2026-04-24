@@ -1,6 +1,8 @@
-# sandworm
+# Sandworm Tracker
 **Windower 4 Addon** | Author: Phayde | Version: 1.0.1
+
 Have you ever tried camping Sandworm for the title? It sucks... but now it can suck less! (unless you want Doomvoid, in which case it can suck more... I guess?)
+
 This addon automatically scans for the roaming Sandworm NM across its 7 possible zones. Detects position movement between scans to confirm the worm is present, then alerts you with coordinates, a map grid reference, a live navigation compass, and an audio cue. Tracks Time of Death and spawn window type (Doomvoid or normal kill) to display the correct respawn window. Integrates with SuperWarp to automatically cycle through all 7 zones until the worm is found.
 
 ---
