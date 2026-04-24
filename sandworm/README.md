@@ -123,7 +123,7 @@ Grid calibration is based on two in-game reference points per zone. Accuracy is 
 
 | Condition | Window Opens | Window Closes |
 |---|---|---|
-| Sandworm uses Doomvoid | 20 hours after | 72 hours after |
+| Sandworm uses Doomvoid | 20 hours after | 25 hours after |
 | Player kills Sandworm | 48 hours after | 72 hours after |
 | Unclaimed despawn | Repops in 1-3h in a random zone | - |
 
