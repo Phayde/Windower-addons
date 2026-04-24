@@ -103,7 +103,7 @@ When the worm is detected, a HUD box appears at the top center of the screen and
 
 ```
 [Sandworm Navigator]
-> NNE  |  143m away  Map: H-7
+> NNE  |  143y away  Map: H-7
 Target: (312.5, -88.2)
 ```
 
