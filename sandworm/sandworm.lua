@@ -70,10 +70,11 @@ local function coords_to_grid(zone_name, x, z)
 end
 
 -- Spawn window constants (in seconds)
-local WINDOW_OPEN_DOOMVOID  = 20 * 3600;   -- 20 hours after Doomvoid
-local WINDOW_OPEN_NORMAL    = 48 * 3600;   -- 48 hours after death
-local WINDOW_CLOSE          = 72 * 3600;   -- 72 hours after death
-local DESPAWN_TIME          = 1 * 3600;    -- despawns after 1 hour unclaimed
+local WINDOW_OPEN_DOOMVOID   = 20 * 3600;   -- 20 hours after Doomvoid
+local WINDOW_CLOSE_DOOMVOID  = 25 * 3600;   -- 25 hours after Doomvoid
+local WINDOW_OPEN_NORMAL     = 48 * 3600;   -- 48 hours after death
+local WINDOW_CLOSE_NORMAL    = 72 * 3600;   -- 72 hours after death
+local DESPAWN_TIME           = 1 * 3600;    -- despawns after 1 hour unclaimed
 
 -- Scan timing
 local SCAN_INTERVAL         = 30;          -- seconds between scans
@@ -331,31 +332,37 @@ local function get_window_status()
     end
 
     if ttype == 'doomvoid' then
-        return single_window(WINDOW_OPEN_DOOMVOID, WINDOW_CLOSE, 'Doomvoid');
+        return single_window(WINDOW_OPEN_DOOMVOID, WINDOW_CLOSE_DOOMVOID, 'Doomvoid');
 
     elseif ttype == 'kill' then
-        return single_window(WINDOW_OPEN_NORMAL, WINDOW_CLOSE, 'kill');
+        return single_window(WINDOW_OPEN_NORMAL, WINDOW_CLOSE_NORMAL, 'kill');
 
     else
         -- Unknown type - show both windows
         if elapsed < WINDOW_OPEN_DOOMVOID then
             return 'before', string.format(
-                'ToD: %s | Window opens in %s (Doomvoid) / %s (normal)',
+                'ToD: %s | Window opens in %s (Doomvoid 20-25h) / %s (normal 48-72h)',
                 tod_str,
                 format_time_diff(WINDOW_OPEN_DOOMVOID - elapsed),
                 format_time_diff(WINDOW_OPEN_NORMAL - elapsed));
-        elseif elapsed < WINDOW_OPEN_NORMAL then
+        elseif elapsed < WINDOW_CLOSE_DOOMVOID then
             return 'doomvoid', string.format(
-                'ToD: %s | Doomvoid window OPEN. Normal window opens in %s.',
+                'ToD: %s | Doomvoid window OPEN (closes in %s). Normal window opens in %s.',
+                tod_str,
+                format_time_diff(WINDOW_CLOSE_DOOMVOID - elapsed),
+                format_time_diff(WINDOW_OPEN_NORMAL - elapsed));
+        elseif elapsed < WINDOW_OPEN_NORMAL then
+            return 'doomvoid_closed', string.format(
+                'ToD: %s | Doomvoid window closed. Normal window opens in %s.',
                 tod_str, format_time_diff(WINDOW_OPEN_NORMAL - elapsed));
-        elseif elapsed <= WINDOW_CLOSE then
+        elseif elapsed <= WINDOW_CLOSE_NORMAL then
             return 'open', string.format(
-                'ToD: %s | Both windows OPEN. Closes in %s.',
-                tod_str, format_time_diff(WINDOW_CLOSE - elapsed));
+                'ToD: %s | Normal window OPEN. Closes in %s.',
+                tod_str, format_time_diff(WINDOW_CLOSE_NORMAL - elapsed));
         else
             return 'expired', string.format(
                 'ToD: %s | Window EXPIRED (%s ago).',
-                tod_str, format_time_diff(elapsed - WINDOW_CLOSE));
+                tod_str, format_time_diff(elapsed - WINDOW_CLOSE_NORMAL));
         end
     end
 end
@@ -824,7 +831,7 @@ windower.register_event('prerender', function()
             -- Use me.x/me.y vs target.x/target.z accordingly
             local dist = distance2d(me.x, me.y, state.nav_target.x, state.nav_target.z);
             if dist <= NAV_CLEAR_DISTANCE then
-                chat(COLOR_OK, string.format("You've reached the Sandworm's position! Distance: %.1f units.", dist));
+                chat(COLOR_OK, string.format("You've reached the Sandworm's position! Distance: %.1fy.", dist));
                 hide_nav();
             else
                 local bearing  = calc_bearing(me.x, me.y, state.nav_target.x, state.nav_target.z);
@@ -832,7 +839,7 @@ windower.register_event('prerender', function()
                 local grid     = coords_to_grid(state.zone_name, state.nav_target.x, state.nav_target.z);
                 local grid_str = grid and ('  Map: ' .. grid) or '';
                 nav_box:text(string.format(
-                    '[Sandworm Navigator]\n> %s  |  %.0fm away%s\nTarget: (%.1f, %.1f)',
+                    '[Sandworm Navigator]\n> %s  |  %.0fy away%s\nTarget: (%.1f, %.1f)',
                     dir, dist, grid_str, state.nav_target.x, state.nav_target.z
                 ));
                 nav_box:show();
