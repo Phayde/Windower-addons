@@ -9,7 +9,7 @@ This addon automatically scans for the roaming Sandworm NM across its 7 possible
 
 ## Installation
 
-1. Drop the `Sandworm` folder into `<Windower4>\addons\`
+1. Drop the `sandworm` folder into `<Windower4>\addons\`
 2. *(Optional)* Place a short WAV file named `alert.wav` in the addon folder - any chime or alarm works. Silently skipped if missing.
 3. *(Optional)* Install and load the SuperWarp addon to enable automatic zone cycling.
 4. Load the addon: `//lua load sandworm`
