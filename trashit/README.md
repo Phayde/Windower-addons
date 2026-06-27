@@ -1,4 +1,4 @@
-# 🗑️ Trash It
+# Trash It
 ### A Windower 4 addon for Final Fantasy XI
 
 > **Activate. Farm. Deactivate. Done.**  
@@ -9,6 +9,8 @@
 ## Overview
 
 I was tired of the Mog Gardening grind clogging my inventory with worthless items. **Trash It** solves this: flip it on before you collect, and every new item that lands in your inventory gets automatically discarded. A bold on-screen indicator stays visible the entire time so you never forget it's running.
+
+Works with gardening, mob farming, fishing, and any other acquisition method.
 
 ---
 
@@ -30,7 +32,7 @@ I was tired of the Mog Gardening grind clogging my inventory with worthless item
 //trash          -> Toggle on/off.
 ```
 
-That's the whole workflow. Turn it on, do your gardening, turn it off.
+That's the whole workflow. Turn it on, do your thing, turn it off.
 
 ---
 
@@ -44,7 +46,7 @@ Items you want to **keep** even when the addon is active:
 //trash list                 -> View current whitelist
 ```
 
-Whitelist matching is **case-insensitive substring** based, so you don't need to know the exact item name. Adding `mythril ore` will protect "Chunk of mythril ore", "Lump of mythril ore", or any other item whose name contains that phrase. Adding `bayld` will protect "Pinch of high-purity bayld", and so on. The whitelist persists between sessions via `settings.xml`.
+Whitelist matching is **case-insensitive substring** based - you don't need to know the exact item name. Adding `mythril ore` will protect "Chunk of mythril ore", "Lump of mythril ore", or any item whose name contains that phrase. Adding `bayld` protects "Pinch of high-purity bayld", and so on. The whitelist persists between sessions via `settings.xml`.
 
 ---
 
@@ -64,7 +66,6 @@ Trash It is designed with a conservative safety model:
 
 ```
 //trash status   -> Show active state, snapshot size, and whitelist count
-//trash debug    -> Toggle verbose debug output (useful for troubleshooting)
 //trash help     -> Show command reference in-game
 ```
 
@@ -72,7 +73,7 @@ Trash It is designed with a conservative safety model:
 
 ## Notes
 
-- Designed and tested for **Mog Gardening**, but should work with any item acquisition method: fishing, digging, mob drops, etc.
+- Designed and tested for **Mog Gardening**, but works with any item acquisition method: mob farming, fishing, digging, chest drops, etc.
 - HUD is positioned for **1920x1080**. For other resolutions, adjust `HUD_X` at the top of the file using: `HUD_X = math.floor(screen_width / 2) - 140`
 - Compatible with auto-sorter addons - a short delay is applied before each drop to give sorters time to move items to their final slot first.
 
