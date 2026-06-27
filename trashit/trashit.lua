@@ -3,7 +3,7 @@
   Trash It (trashit) - Auto-Discard Addon for Windower 4
 ================================================================================
   Author: Phayde
-  Version: 1.0.0
+  Version: 2.0.0
 
   Automatically discards newly acquired items while active. Designed for Mog
   Gardening: activate before collecting crops, deactivate when done. A
@@ -17,33 +17,32 @@
       will NEVER be touched - even if you pick up another one.
     - Drops only the exact number of units that exceed your pre-activation count.
     - A whitelist lets you protect items by keyword: "mythril ore" protects
-      any item whose name contains that phrase.
+      any item whose name contains that phrase (case-insensitive substring).
 
   SETUP:
     1. Place trashit.lua in: Windower/addons/trashit/
     2. Load with: //lua load trashit
-    3. //trash on  (then do your gardening)
+    3. //trash on  (then do your gardening, farming, or fishing)
     4. //trash off
 
   COMMANDS:
     //trash on              - Activate: begin discarding new items
     //trash off             - Deactivate: stop discarding
     //trash                 - Toggle on/off
-    //trash keep <item>     - Add item to whitelist (exact name, case-insensitive)
-    //trash remove <item>   - Remove item from whitelist
+    //trash keep <term>     - Add term to whitelist (case-insensitive substring)
+    //trash remove <term>   - Remove term from whitelist
     //trash list            - Show current whitelist
     //trash status          - Show current state and snapshot summary
-    //trash debug           - Toggle debug output on/off
     //trash help            - Show this help text
 
   CONFIGURATION (settings.xml):
-    whitelist               - Comma-separated item names to always keep
+    whitelist               - Comma-separated terms to always keep
 ================================================================================
 ]]
 
 _addon.name     = 'trashit'
 _addon.author   = 'Phayde'
-_addon.version  = '1.0.0'
+_addon.version  = '2.0.0'
 _addon.commands = {'trashit', 'trash'}
 
 require('logger')
@@ -57,8 +56,8 @@ local res_items = require('resources').items
 
 local defaults = {
     -- Comma-separated list of terms to always keep, even when active.
-    -- Matching is case-insensitive substring: "bayld" protects
-    -- "Pinch of High-Purity Bayld", etc.
+    -- Matching is case-insensitive substring: "mythril ore" protects
+    -- "Chunk of mythril ore", "Lump of mythril ore", etc.
     whitelist = '',
 }
 
@@ -69,20 +68,23 @@ settings = config.load(defaults)
 -- ============================================================================
 
 local active    = false   -- is Trash It currently discarding items?
-local debug_mode = false  -- print debug output to chat when true
 
 -- Inventory snapshot: { [item_name_lowercase] = count }
 -- Populated when the addon is activated. Any item with a count > 0 here
 -- is considered pre-existing and will never be touched.
 local snapshot  = {}
 
--- Parsed whitelist: { [item_name_lowercase] = true }
+-- Parsed whitelist: { [term_lowercase] = true }
 local whitelist = {}
 
 -- True when a sweep coroutine is already scheduled and waiting to fire.
--- Prevents stacking multiple redundant sweeps when several "Obtained"
--- messages arrive within the same 0.5s window.
+-- Prevents stacking multiple redundant sweeps when several item messages
+-- arrive within the same 0.5s window.
 local sweep_scheduled = false
+
+-- Cached player name, set on load and on activation.
+-- Used to match mob-drop and fishing messages: "<Player> obtains/caught a/an <item>."
+local player_name = nil
 
 -- ============================================================================
 --  HUD (on-screen display)
@@ -139,14 +141,7 @@ local COLOR = {
     success = 158,  -- green
     warn    = 167,  -- orange/yellow
     header  = 200,  -- bright white
-    notice  = 036,  -- sky blue, used for debug output
 }
-
-local function dlog(msg)
-    if debug_mode then
-        cprint(COLOR.notice, '[DEBUG] ' .. tostring(msg))
-    end
-end
 
 local function parse_whitelist()
     local t = {}
@@ -172,7 +167,7 @@ local function save_whitelist()
     config.save(settings)
 end
 
--- Returns true if item_name (lowercase) contains any whitelist entry
+-- Returns true if item_name (lowercase) contains any whitelist term
 -- as a substring. "mythril ore" will match "chunk of mythril ore", etc.
 local function is_whitelisted(name_lower)
     for term in pairs(whitelist) do
@@ -213,7 +208,6 @@ end
 local function sweep_and_drop()
     sweep_scheduled = false
     local inventory = windower.ffxi.get_items(0)
-    dlog('Sweep firing...')
 
     for index, item in pairs(inventory) do
         if type(index) == 'number' and type(item) == 'table'
@@ -225,22 +219,12 @@ local function sweep_and_drop()
                 local current_count = item.count or 1
                 local to_drop       = math.max(current_count - pre_existing, 0)
 
-                -- Skip if nothing new in this slot
-                if to_drop > 0 then
-                    -- Whitelist check - never drop protected items
-                    if is_whitelisted(name_lower) then
-                        dlog(('  slot %d: "%s" +%d new but whitelisted - keeping.'):format(
-                            index, res.name, to_drop))
-                    else
-                        dlog(('  slot %d: "%s" current=%d snapshot=%d - dropping %d'):format(
-                            index, res.name, current_count, pre_existing, to_drop))
-                        windower.ffxi.drop_item(index, to_drop)
-                    end
+                if to_drop > 0 and not is_whitelisted(name_lower) then
+                    windower.ffxi.drop_item(index, to_drop)
                 end
             end
         end
     end
-    dlog('Sweep complete.')
 end
 
 -- ============================================================================
@@ -251,6 +235,10 @@ local function activate()
     if active then
         cprint(COLOR.warn, 'Already active.')
         return
+    end
+    if not player_name then
+        local player = windower.ffxi.get_player()
+        player_name = player and player.name or nil
     end
     take_snapshot()
     active = true
@@ -277,43 +265,46 @@ end
 --  INCOMING TEXT EVENT (item detection)
 -- ============================================================================
 --
--- FFXI prints "Obtained: <Item Name>." whenever an item lands in inventory.
--- The chat mode varies by acquisition method - mode 4 for digging, but
--- gardening and fishing may use a different mode number. We no longer filter
--- by mode; the text pattern is the only gate. Debug mode will print the mode
--- number of every match so you can confirm all acquisition types are caught.
+-- FFXI uses distinct message formats depending on how an item is acquired:
+--
+--   Gardening / digging:   "Obtained: <Item Name>."
+--   Mob / chest drops:     "<Player> obtains a/an <Item Name>."
+--   Fishing:               "<Player> caught a/an <Item Name>!"
+--
+-- We match all three patterns. The player name is fetched once at activation
+-- and cached so we don't call get_player() on every incoming line.
 
 windower.register_event('incoming text', function(original, modified, original_mode)
     if not active then return end
 
     -- Strip embedded color/escape bytes before pattern matching
     local clean = original:gsub('%c', '')
-    local item_name = clean:match('[Oo]btained:%s+(.-)%s*%.')
-    if not item_name or item_name == '' then return end
+    local item_name =
+        -- Pattern 1: gardening, digging, etc. - "Obtained: <item>."
+        clean:match('[Oo]btained:%s+(.-)%s*%.') or
+        -- Pattern 2: mob drops - "<Player> obtains a/an <item>."
+        -- Match against the cached player name so we don't react to party
+        -- members' drops appearing in your log.
+        (player_name and clean:match(player_name .. ' obtains an?%s+(.-)%s*%.')) or
+        -- Pattern 3: fishing - "<Player> caught a/an <item>!"
+        (player_name and clean:match(player_name .. ' caught an?%s+(.-)%s*!'))
 
-    -- DEBUG: always print matches when debug mode is on
-    dlog(('Obtained match | mode=%d | item="%s"'):format(original_mode, item_name))
+    if not item_name or item_name == '' then return end
 
     -- Whitelist check: if this item is protected, no sweep needed unless
     -- other non-whitelisted items also arrived in the same batch.
     -- The sweep itself also enforces the whitelist, but skipping here avoids
     -- scheduling a sweep that would do nothing when only kept items are obtained.
-    if is_whitelisted(item_name:lower()) then
-        dlog(('"%s" is whitelisted - keeping.'):format(item_name))
-        return
-    end
+    if is_whitelisted(item_name:lower()) then return end
 
-    -- Schedule a sweep if one is not already pending. Any additional "Obtained"
+    -- Schedule a sweep if one is not already pending. Any additional item
     -- messages that arrive within the 0.5s window are covered automatically
     -- when the single sweep fires and checks the whole inventory at once.
     if not sweep_scheduled then
         sweep_scheduled = true
-        dlog('Sweep scheduled in 0.5s...')
         coroutine.schedule(function()
             sweep_and_drop()
         end, 0.5)
-    else
-        dlog('Sweep already pending - no new coroutine needed.')
     end
 end)
 
@@ -334,42 +325,32 @@ windower.register_event('addon command', function(cmd, ...)
     elseif cmd == 'off' then
         deactivate()
 
-    elseif cmd == 'debug' then
-        debug_mode = not debug_mode
-        if debug_mode then
-            cprint(COLOR.notice, 'Debug mode ON. Verbose output enabled.')
-        else
-            cprint(COLOR.info, 'Debug mode OFF.')
-        end
-
     elseif cmd == 'keep' then
         if #args == 0 then
-            cprint(COLOR.warn, 'Usage: //trash keep <item name>')
+            cprint(COLOR.warn, 'Usage: //trash keep <term>')
             return
         end
-        local item_name  = table.concat(args, ' ')
-        local name_lower = item_name:lower()
-        if whitelist[name_lower] then
-            cprint(COLOR.info, ('"' .. item_name .. '" is already on the whitelist.'))
+        local term = table.concat(args, ' '):lower()
+        if whitelist[term] then
+            cprint(COLOR.info, ('"' .. term .. '" is already on the whitelist.'))
         else
-            whitelist[name_lower] = true
+            whitelist[term] = true
             save_whitelist()
-            cprint(COLOR.success, ('"' .. item_name .. '" added to whitelist. It will be kept if obtained.'))
+            cprint(COLOR.success, ('"' .. term .. '" added to whitelist.'))
         end
 
     elseif cmd == 'remove' then
         if #args == 0 then
-            cprint(COLOR.warn, 'Usage: //trash remove <item name>')
+            cprint(COLOR.warn, 'Usage: //trash remove <term>')
             return
         end
-        local item_name  = table.concat(args, ' ')
-        local name_lower = item_name:lower()
-        if not whitelist[name_lower] then
-            cprint(COLOR.warn, ('"' .. item_name .. '" is not on the whitelist.'))
+        local term = table.concat(args, ' '):lower()
+        if not whitelist[term] then
+            cprint(COLOR.warn, ('"' .. term .. '" is not on the whitelist.'))
         else
-            whitelist[name_lower] = nil
+            whitelist[term] = nil
             save_whitelist()
-            cprint(COLOR.success, ('"' .. item_name .. '" removed from whitelist.'))
+            cprint(COLOR.success, ('"' .. term .. '" removed from whitelist.'))
         end
 
     elseif cmd == 'list' then
@@ -398,18 +379,16 @@ windower.register_event('addon command', function(cmd, ...)
         local wl_count = 0
         for _ in pairs(whitelist) do wl_count = wl_count + 1 end
         cprint(COLOR.info, ('Whitelist: %d item(s). Use //trash list to view.'):format(wl_count))
-        cprint(COLOR.info, ('Debug mode: %s'):format(debug_mode and 'ON' or 'OFF'))
 
     elseif cmd == 'help' then
         cprint(COLOR.header, '--- Trash It v' .. _addon.version .. ' ---')
         windower.add_to_chat(COLOR.info, '  //trash on              - Activate and begin discarding new items')
         windower.add_to_chat(COLOR.info, '  //trash off             - Deactivate: stop discarding items')
         windower.add_to_chat(COLOR.info, '  //trash                 - Toggle on/off')
-        windower.add_to_chat(COLOR.info, '  //trash keep <term>     - Add term to whitelist (substring match, case-insensitive)')
-        windower.add_to_chat(COLOR.info, '  //trash remove <item>   - Remove item from whitelist')
+        windower.add_to_chat(COLOR.info, '  //trash keep <term>     - Add term to whitelist (substring, case-insensitive)')
+        windower.add_to_chat(COLOR.info, '  //trash remove <term>   - Remove term from whitelist')
         windower.add_to_chat(COLOR.info, '  //trash list            - Show whitelist')
         windower.add_to_chat(COLOR.info, '  //trash status          - Show current state and snapshot info')
-        windower.add_to_chat(COLOR.info, '  //trash debug           - Toggle verbose debug output')
         windower.add_to_chat(COLOR.info, '  //trash help            - Show this help text')
         windower.add_to_chat(COLOR.info, 'SAFETY: Items already in inventory at activation are never touched.')
         windower.add_to_chat(COLOR.info, 'Only newly acquired units are dropped - pre-existing stacks are never touched.')
@@ -426,6 +405,8 @@ end)
 windower.register_event('load', function()
     whitelist = parse_whitelist()
     hud_hide()
+    local player = windower.ffxi.get_player()
+    player_name = player and player.name or nil
     local wl_count = 0
     for _ in pairs(whitelist) do wl_count = wl_count + 1 end
     cprint(COLOR.info, ('v%s loaded. Whitelist: %d item(s). Use //trash on to activate.'):format(
