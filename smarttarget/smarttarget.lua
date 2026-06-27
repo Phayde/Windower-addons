@@ -1,4 +1,4 @@
-_addon.version = '1.0.1'
+_addon.version = '1.0.3'
 _addon.name = 'smarttarget'
 _addon.author = 'Anonymous; v0.0.4+ by Phayde'
 _addon.commands = {'smarttarget','smrt','smart'}
@@ -128,6 +128,16 @@ local statues = S{"Impish Statue","Corporal Tombstone","Lithicthrower Image","In
 -- Radius (in yalms) used by //smrt finish to scan for the lowest HP mob.
 -- Edit this value to adjust the scan range.
 local finish_radius = 10
+
+-- Seconds the assist target must remain on a new mob before we follow suit.
+-- Increase if assist mode chases too many transitional target hops; decrease for faster mirroring.
+local assist_settle_delay = 1.5
+
+-- Assist mode runtime state. Never saved to settings -- always resets to off on load.
+local assist_mode          = false  -- true while assist mode is active
+local assist_target_name   = nil    -- name of the player we are assisting
+local assist_pending_id    = nil    -- mob ID seen on assist target but not yet committed to
+local assist_pending_since = 0      -- timestamp when we first saw that pending mob ID
 
 -- Whole-word, case-insensitive matching helper.
 local function escape_lua_pattern(s)
@@ -268,7 +278,7 @@ end
 -- -----------------------------------------------------------------------------
 
 function is_mob_claimable(mob, player_mob, party)
-    if mob.valid_target and mob.is_npc and not mob.charmed and not mob.in_party and not mob.in_alliance and mob.spawn_type == 16 and math.sqrt(mob.distance) <= max_distance then
+    if mob.valid_target and mob.is_npc and not mob.charmed and not mob.in_party and not mob.in_alliance and mob.spawn_type == 16 and math.sqrt(mob.distance) <= max_distance and mob.hpp > 0 then
         if not mob.claim_id or mob.claim_id < 1 then
             return true
         elseif mob.claim_id == player_mob.id then
@@ -611,6 +621,8 @@ local function print_status()
         ..'   '..c1..'Whitelist'..cr..': '..c2..wl..cr
         ..'  '..c1..'Greylist'..cr..': '..c2..gl..cr
         ..'  '..c1..'Blacklist'..cr..': '..c2..bl..cr)
+    windower.add_to_chat(207, c1..'  Assist mode   '..cr..': '..onoff(assist_mode)
+        ..(assist_mode and ('   '..c1..'Target'..cr..': '..c2..(assist_target_name or '?')..cr) or ''))
     windower.add_to_chat(200, c0..'----------------------------------------------------------')
 end
 
@@ -619,7 +631,7 @@ local function limbus_is_paused()
 end
 
 -- One-shot command: immediately targets the lowest HP% mob within finish_radius yalms.
--- Bypasses the auto-targeting loop and anti-thrash rate limiter — this is a deliberate
+-- Bypasses the auto-targeting loop and anti-thrash rate limiter -- this is a deliberate
 -- manual action. Works even when the addon is toggled off. Respects the blacklist.
 local function do_finish()
     local player = windower.ffxi.get_player()
@@ -672,6 +684,96 @@ local function do_finish()
         switch_player(player_mob, best_mob)
     else
         engage_player(player_mob, best_mob)
+    end
+end
+
+-- Called every prerender tick when assist mode is active.
+-- Mirrors the assist target's current engaged mob with a settle delay to avoid
+-- chasing transitional target hops while the assist target's own addon settles.
+local function do_assist_tick()
+    -- Respect //smrt off -- assist mode observes the active flag
+    if not active then return end
+
+    local player = windower.ffxi.get_player()
+    if not player or not player.index then return end
+    local player_mob = windower.ffxi.get_mob_by_index(player.index)
+    if not player_mob then return end
+
+    -- Find the assist target by scanning the party/alliance table for a name match.
+    -- We use this instead of get_mob_by_name because players are not reliably
+    -- found via mob name lookups -- the party table gives us their mob index directly.
+    local assist_mob = nil
+    local party_table = windower.ffxi.get_party()
+    if party_table then
+        for _, key in ipairs(party_member_names) do
+            local member = party_table[key]
+            if member and member.name and member.name:lower() == assist_target_name:lower() then
+                if member.mob and member.mob.index then
+                    assist_mob = windower.ffxi.get_mob_by_index(member.mob.index)
+                end
+                break
+            end
+        end
+    end
+
+    if not assist_mob then
+        -- Assist target not found (zoned, dead, not in party) -- disengage if engaged
+        if status ~= 0 then
+            disengage_player()
+            if debug_mode then add_chat('Smart Target [assist]: '..assist_target_name..' not found in party, disengaging.') end
+        end
+        assist_pending_id    = nil
+        assist_pending_since = 0
+        return
+    end
+
+    -- Read the assist target's current target via their target_index
+    local their_target_id = nil
+    if assist_mob.target_index and assist_mob.target_index ~= 0 then
+        local their_target = windower.ffxi.get_mob_by_index(assist_mob.target_index)
+        if their_target then
+            their_target_id = their_target.id
+        end
+    end
+
+    -- If they have no target or are disengaged (status 0), disengage and clear pending
+    if not their_target_id or assist_mob.status ~= 1 then
+        if status ~= 0 then
+            disengage_player()
+            if debug_mode then add_chat('Smart Target [assist]: '..assist_target_name..' disengaged, following suit.') end
+        end
+        assist_pending_id    = nil
+        assist_pending_since = 0
+        return
+    end
+
+    -- If their target changed, restart the settle timer (also clears any post-commit cooldown)
+    if their_target_id ~= assist_pending_id then
+        assist_pending_id    = their_target_id
+        assist_pending_since = os.clock()
+        if debug_mode then add_chat('Smart Target [assist]: new pending target, settling...') end
+        return
+    end
+
+    -- If the settle delay hasn't elapsed yet, wait
+    if (os.clock() - assist_pending_since) < assist_settle_delay then return end
+
+    -- Settle delay passed -- commit to this target if we aren't already on it
+    local target_mob = windower.ffxi.get_mob_by_id(their_target_id)
+    if not target_mob then return end
+
+    if target_id == their_target_id then return end  -- already on it
+
+    if debug_mode then add_chat('Smart Target [assist]: committing to '..target_mob.name) end
+
+    -- Push the pending timer forward so we don't spam the same switch every tick
+    -- while waiting for the incoming packet to confirm the target change.
+    assist_pending_since = os.clock() + 999
+
+    if status ~= 0 then
+        switch_player(player_mob, target_mob)
+    else
+        engage_player(player_mob, target_mob)
     end
 end
 
@@ -808,6 +910,22 @@ function smarttarget_command(...)
 		sync_and_save()
 		return
 
+    elseif args[1] == 'assist' or args[1] == 'as' then
+        if not args[2] or args[2] == 'off' then
+            assist_mode        = false
+            assist_target_name = nil
+            assist_pending_id  = nil
+            assist_pending_since = 0
+            add_chat('Smart Target: Assist mode OFF - returning to normal targeting')
+        else
+            assist_target_name = args[2]
+            assist_mode        = true
+            assist_pending_id  = nil
+            assist_pending_since = 0
+            add_chat('Smart Target: Assist mode ON - mirroring '..assist_target_name..' (settle delay: '..assist_settle_delay..'s)')
+        end
+        return
+
     elseif args[1] == 'finish' then
         do_finish()
         return
@@ -841,6 +959,8 @@ function smarttarget_command(...)
         cmd('//smrt hp',      '<0-100 | off>',    'Prefer mobs at or above HP% threshold')
         cmd('//smrt first',   'on | off | toggle',    'Lock your manually chosen first target')
         cmd('//smrt limbus',  'on | off | toggle',    'Auto-disengage on Limbus floor completion')
+        cmd('//smrt assist',  '<name> | off',         'Mirror a player\'s target continuously (assist mode)')
+        cmd('//smrt as',      '<name> | off',         'Alias for //smrt assist')
         cmd('//smrt finish',  '',                     'Swap to lowest HP mob within '..finish_radius..'y (one-shot)')
         windower.add_to_chat(207, ' ')
 		cmd('//smrt bias',    '<0-25>',           'Yalm bonus/penalty for whitelist/greylist')
@@ -924,6 +1044,12 @@ function switch_player(player_mob, mob)
 end
 
 function do_target(current_target_id, engage)
+    -- Assist mode takes full control -- skip the normal weighting system entirely
+    if assist_mode then
+        do_assist_tick()
+        return
+    end
+
     if not active then
         return
     end
@@ -1089,6 +1215,12 @@ end
 
 -- Pre-render tick for delayed retarget after a kill.
 local function smarttarget_prerender()
+    -- Assist mode runs its own continuous scan every tick
+    if assist_mode then
+        do_assist_tick()
+        return
+    end
+
     if not pending_retarget then return end
 
     if (os.clock() - (pending_retarget_time or 0)) < (pending_retarget_delay or 0.25) then
