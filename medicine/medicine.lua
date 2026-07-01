@@ -174,8 +174,9 @@ local AP_BUSY_POLL       = 0.5
 local defaults = {}
 defaults.ignore   = S{'poison'}
 defaults.autoscan = false
-defaults.hud_x    = 10
-defaults.hud_y    = 3
+defaults.hud_x       = 10
+defaults.hud_y       = 3
+defaults.movement_check = false
 
 local settings = config.load(defaults)
 
@@ -196,6 +197,36 @@ local function err(text)  windower.add_to_chat(COL.ERR,  PREFIX..text) end
 local monitor_mode   = false
 local monitor_buffs  = S{}
 local monitor_labels = {}
+
+-- ============================================================
+--  Movement Detection State
+-- ============================================================
+local last_pos          = nil   -- {x, y, z} from last position check
+local movement_waiting  = false -- true if we're currently waiting for the player to stop moving
+local MOVE_THRESHOLD     = 0.05 -- minimum distance change (in-game units) to count as "moving"
+local MOVE_POLL_INTERVAL = 0.5  -- how often to re-check position while waiting
+
+local function get_player_pos()
+    local mob = windower.ffxi.get_mob_by_target('me')
+    if not mob then return nil end
+    return {x = mob.x, y = mob.y, z = mob.z}
+end
+
+local function is_player_moving()
+    if not settings.movement_check then return false end
+    local pos = get_player_pos()
+    if not pos then return false end
+    if last_pos == nil then
+        last_pos = pos
+        return false  -- first check, no baseline yet
+    end
+    local dx = pos.x - last_pos.x
+    local dy = pos.y - last_pos.y
+    local dz = pos.z - last_pos.z
+    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+    last_pos = pos
+    return dist > MOVE_THRESHOLD
+end
 
 -- ============================================================
 --  Autopoison State (session only)
@@ -404,6 +435,26 @@ local function finish_queue()
     queue   = {}
     local was_monitor  = monitor_mode
     local was_autoscan = settings.autoscan
+
+    -- Cleanup scan: check if any new debuffs landed while the queue was running.
+    -- Only applies in autoscan or monitor mode since manual mode is a single cycle.
+    if was_autoscan or was_monitor then
+        local source = was_monitor and 'monitor' or 'autoscan'
+        local built = build_queue(was_monitor and monitor_buffs or nil)
+        if built and #built > 0 then
+            info('New debuffs detected after cure cycle - starting follow-up scan.')
+            busy  = true
+            queue = built
+            hud_update(HUD_STATE.ACTIVE, (function()
+                local names = {}
+                for _, e in ipairs(built) do table.insert(names, e.item) end
+                return names
+            end)())
+            use_next_in_queue()
+            return
+        end
+    end
+
     hud_update(HUD_STATE.CLEAR)
     coroutine.schedule(function()
         if not busy then
@@ -429,6 +480,23 @@ attempt_current = function()
         use_next_in_queue()
         return
     end
+
+    -- Movement check: wait for the player to stop moving before using the item
+    if is_player_moving() then
+        if not movement_waiting then
+            movement_waiting = true
+            windower.add_to_chat(COL.WARN, PREFIX..pending.item..' for '..pending.label..
+                ' is ready - will use when you stop moving.')
+        end
+        coroutine.schedule(function()
+            attempt_current()
+        end, MOVE_POLL_INTERVAL)
+        return
+    elseif movement_waiting then
+        movement_waiting = false
+        info('Movement stopped - using '..pending.item..' now.')
+    end
+
     local ok, count = check_item(pending.item)
     if not ok then
         pending = nil
@@ -1000,13 +1068,16 @@ local SLASH_SHORTCUTS = {
     ['^/iw$']            = ITEMS.ICARUS_WING,
     ['^/fruit$']         = ITEMS.PACHIRA_FRUIT,
     ['^/pachira$']       = ITEMS.PACHIRA_FRUIT,
-    -- Prism Powder
+    -- Prism Powder (/invisible excluded - spell conflict via shortcuts addon)
     ['^/prism$']         = ITEMS.PRISM_POWDER,
     ['^/powder$']        = ITEMS.PRISM_POWDER,
     ['^/prismpowder$']   = ITEMS.PRISM_POWDER,
-    -- Silent Oil
+    ['^/invis$']         = ITEMS.PRISM_POWDER,
+    ['^/inv$']           = ITEMS.PRISM_POWDER,
+    -- Silent Oil (/sneak excluded - spell conflict via shortcuts addon)
     ['^/oil$']           = ITEMS.SILENT_OIL,
     ['^/silentoil$']     = ITEMS.SILENT_OIL,
+    ['^/snk$']           = ITEMS.SILENT_OIL,
 }
 
 windower.register_event('incoming text', function(original, modified, mode, newmode, blocked)
@@ -1128,6 +1199,7 @@ local function print_status()
     else
         info('Autofood: OFF')
     end
+    info('Movement detection: '..(settings.movement_check and 'ON' or 'OFF'))
     local ignore_list = {}
     for k in pairs(settings.ignore) do table.insert(ignore_list, k) end
     info('Ignore list: '..(#ignore_list > 0 and table.concat(ignore_list, ', ') or '(empty)'))
@@ -1198,6 +1270,21 @@ windower.register_event('addon command', function(...)
 
     if cmd == 'rr' or cmd == 'reraise' then
         use_reraise()
+        return
+    end
+
+    if cmd == 'movement' or cmd == 'move' then
+        local sub = args[2] and args[2]:lower() or ''
+        if sub == 'on' then
+            settings.movement_check = true
+        elseif sub == 'off' then
+            settings.movement_check = false
+        else
+            settings.movement_check = not settings.movement_check
+        end
+        settings:save()
+        last_pos = nil  -- reset baseline so the next check doesn't false-trigger
+        info('Movement detection '..(settings.movement_check and 'ON' or 'OFF'))
         return
     end
 
