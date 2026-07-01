@@ -1,5 +1,5 @@
 # Medicine Cabinet
-### A Windower 4 Addon for FFXI
+### A Windower Addon for FFXI
 **Version:** 2.10 | **Author:** Phayde | **Commands:** `//med` or `//medicine`
 
 ---
@@ -120,6 +120,25 @@ Autofood is **session only** -- resets when the addon is reloaded. If your food 
 
 ---
 
+### Movement Detection -- `//med movement`
+
+When enabled, Medicine Cabinet checks whether you are moving before firing any item use attempt. If you are moving, it holds the item and displays a yellow warning in chat -- once -- letting you know it's ready and waiting. The moment you stop moving it fires immediately and resumes the normal retry loop.
+
+**Best for:** Situations where you need to keep moving but know a debuff needs to be cleared as soon as you stop -- such as a BRD pulling a full floor of mobs while getting silenced by casters along the way. Rather than burning through retry attempts mid-pull (when the item would fail anyway), Medicine Cabinet waits patiently and fires the instant you arrive at your destination.
+
+The movement check applies to every item attempt, including retries, so no attempts are wasted while you are in motion.
+
+```
+//med movement           toggle on/off
+//med movement on        explicitly enable
+//med movement off       explicitly disable
+//med move               shorthand for all of the above
+```
+
+Movement detection is **saved** and persists across addon reloads.
+
+---
+
 ## Cure Priority & Item Logic
 
 When a scan runs (in any mode), debuffs are handled in this order:
@@ -191,6 +210,7 @@ The `lose buff` game event is also monitored as a fast-path -- if your debuff dr
 //med autopoison/ap [on|off]     Toggle automatic poison reapplication
 //med autofood/af <item name>    Auto-reapply food when it wears off
 //med autofood/af off            Disable autofood
+//med movement/move [on|off]     Toggle movement-aware item delay
 //med doom                       Manually trigger Doom removal Holy Water loop
 ```
 
@@ -238,13 +258,13 @@ No `//med` prefix needed. Type these directly in chat like any other slash comma
 /icaruswing  /wing  /iw          Use an Icarus Wing
 /fruit  /pachira                 Use an El. Pachira Fruit
 /prism  /powder  /prismpowder    Use a Prism Powder
-/invis                           Use a Prism Powder
+/invis  /inv                     Use a Prism Powder
 /oil  /silentoil                 Use a Silent Oil
 /snk                             Use a Silent Oil
 /rr                              Use best available Reraise item
 ```
 
-> **Note:** `/echo`, `/holy`, `/invisible`, and `/sneak` are vanilla FFXI commands or conflict with the shortcuts addon and are intentionally excluded. Use the alternatives listed above instead. `/hw` conflicts with Healing Waltz in the shortcuts addon and is also excluded.
+> **Note:** `/echo`, `/holy`, `/invisible`, and `/sneak` are vanilla FFXI commands or conflict with the shortcuts addon and are intentionally excluded. Use the alternatives listed above instead. `/hw` conflicts with Healing Waltz in the shortcuts addon and is also excluded. `/inv` is safe to use for Prism Powder as it has no vanilla conflict.
 
 ### Info
 ```
@@ -285,6 +305,7 @@ maxhpdown    maxmpdown
 | Autoscan | OFF | Toggle with `//med autoscan`; persists across reloads |
 | Autopoison | OFF | Session only, resets on reload |
 | Autofood | OFF | Session only, resets on reload |
+| Movement detection | OFF | Toggle with `//med movement`; persists across reloads |
 | Monitor mode | OFF | Session only, resets on reload |
 | Ignore list | Poison | Add/remove with `//med ignore <buff>`; persists across reloads |
 | HUD position | Top-left | Draggable; position saved on unload |
@@ -311,6 +332,9 @@ maxhpdown    maxmpdown
 - Added HUD with live status display (draggable, position saved)
 - Retry delay tuned to 3.0 seconds
 - Generation counter pattern prevents duplicate item use on interrupted retries
+- Added movement detection -- holds item use while player is moving, fires on stop
+- Added cleanup scan at end of each cure cycle to catch debuffs that landed mid-queue
+- Added /inv as additional shortcut for Prism Powder
 - Known issue: occasional crash observed in Ghoyu's Reverie (MMM) -- under investigation
 
 **v2.00**
