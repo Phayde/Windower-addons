@@ -11,7 +11,7 @@
   SETUP:
     1. Ride your chocobo (rented or personal)
     2. Have Gysahl Greens in your inventory
-    3. Run //cc log (chococard addon) to find your chocobo's END stat value
+    3. [Still in beta] Run //cc log (chococard addon) to find your chocobo's END stat value
        and set it with: //ds end <value>  (or edit settings.xml)
     4. //ds start
 
