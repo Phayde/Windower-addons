@@ -1,7 +1,7 @@
 # Phayde's Windower Addons
 
 > **Quality-of-life addons for Final Fantasy XI, built for the 2026 endgame meta.**
-> Developed and maintained by **Phayde** on the [Windower](https://windower.net) platform.
+> Developed and maintained by **Phayde** for the [Windower](https://windower.net) platform.
 >
 > Disclaimer: The addons in this repository are provided for personal use and shared without warranty of any kind. Use is entirely at your own risk. I make no guarantees regarding functionality, compatibility, or continued maintenance. I assume no liability for account penalties, data loss, or any other outcomes resulting from their use.
 
