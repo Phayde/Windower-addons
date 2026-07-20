@@ -275,7 +275,7 @@ local function handle_list_command(list_tbl, list_name, subcmd, token)
     end
 end
 
--- -----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
 
 function is_mob_claimable(mob, player_mob, party)
     if mob.valid_target and mob.is_npc and not mob.charmed and not mob.in_party and not mob.in_alliance and mob.spawn_type == 16 and math.sqrt(mob.distance) <= max_distance and mob.hpp > 0 then
