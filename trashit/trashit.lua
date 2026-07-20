@@ -3,7 +3,7 @@
   Trash It (trashit) - Auto-Discard Addon for Windower 4
 ================================================================================
   Author: Phayde
-  Version: 2.0.0
+  Version: 2.1.0
 
   Automatically discards newly acquired items while active. Designed for Mog
   Gardening: activate before collecting crops, deactivate when done. A
@@ -32,11 +32,15 @@
     //trash keep <term>     - Add term to whitelist (case-insensitive substring)
     //trash remove <term>   - Remove term from whitelist
     //trash list            - Show current whitelist
+    //trash toss <term>     - Session-only: discard new slots of this item even if already owned
+    //trash toss            - Show toss list
+    //trash untoss <term>   - Remove term from toss list
     //trash status          - Show current state and snapshot summary
     //trash help            - Show this help text
 
   CONFIGURATION (settings.xml):
     whitelist               - Comma-separated terms to always keep
+    tosslist                - not saved; session-only via //trash toss
 ================================================================================
 ]]
 
@@ -76,6 +80,12 @@ local snapshot  = {}
 
 -- Parsed whitelist: { [term_lowercase] = true }
 local whitelist = {}
+
+-- Toss list: { [term_lowercase] = true }
+-- Session-only (not saved to settings.xml). Items matching a toss term are
+-- non-stackable items where any slot NOT recorded in the snapshot is dropped.
+-- Pre-existing slots recorded at activation are always protected.
+local tosslist = {}
 
 -- True when a sweep coroutine is already scheduled and waiting to fire.
 -- Prevents stacking multiple redundant sweeps when several item messages
@@ -178,19 +188,39 @@ local function is_whitelisted(name_lower)
     return false
 end
 
+-- Returns true if item_name (lowercase) contains any toss list term.
+-- Toss overrides whitelist if a term matches both.
+local function is_tossed(name_lower)
+    for term in pairs(tosslist) do
+        if name_lower:find(term, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
 -- ============================================================================
 --  INVENTORY SNAPSHOT
 -- ============================================================================
 
+-- snapshot structure:
+--   snapshot[name_lower].count = total units owned at activation
+--   snapshot[name_lower].slots = { [slot_index] = true } for toss list items
+--     so we can identify which slots are pre-existing vs newly acquired.
 local function take_snapshot()
     snapshot = {}
     local inventory = windower.ffxi.get_items(0)
-    for _, item in ipairs(inventory) do
-        if type(item) == 'table' and item.id and item.id ~= 0 then
+    for index, item in pairs(inventory) do
+        if type(index) == 'number' and type(item) == 'table'
+        and item.id and item.id ~= 0 then
             local res = res_items[item.id]
             if res then
                 local name_lower = res.name:lower()
-                snapshot[name_lower] = (snapshot[name_lower] or 0) + (item.count or 1)
+                if not snapshot[name_lower] then
+                    snapshot[name_lower] = { count = 0, slots = {} }
+                end
+                snapshot[name_lower].count = snapshot[name_lower].count + (item.count or 1)
+                snapshot[name_lower].slots[index] = true
             end
         end
     end
@@ -205,7 +235,7 @@ end
 -- Called via a 0.5s delayed coroutine so the auto-sorter has time to settle
 -- before we scan. Because it checks the whole inventory in one pass, it
 -- catches all new items regardless of how many arrived simultaneously.
-local function sweep_and_drop()
+local function sweep_and_drop(verbose)
     sweep_scheduled = false
     local inventory = windower.ffxi.get_items(0)
 
@@ -214,17 +244,46 @@ local function sweep_and_drop()
         and item.id and item.id ~= 0 and item.status == 0 then
             local res = res_items[item.id]
             if res then
-                local name_lower    = res.name:lower()
-                local pre_existing  = snapshot[name_lower] or 0
-                local current_count = item.count or 1
-                local to_drop       = math.max(current_count - pre_existing, 0)
+                local name_lower  = res.name:lower()
+                local snap        = snapshot[name_lower]
+                local pre_count   = snap and snap.count or 0
+                local cur_count   = item.count or 1
+                local tossed      = is_tossed(name_lower)
+                local listed      = is_whitelisted(name_lower)
 
-                if to_drop > 0 and not is_whitelisted(name_lower) then
-                    windower.ffxi.drop_item(index, to_drop)
+                if tossed then
+                    -- Toss list logic: slot-based for non-stackable items.
+                    -- If this slot index was NOT present at activation, it is
+                    -- a newly acquired item - drop the whole slot.
+                    local slot_is_new = not (snap and snap.slots[index])
+                    if verbose then
+                        cprint(COLOR.info, ('slot %d: "%s" tossed=true slot_is_new=%s'):format(
+                            index, res.name, tostring(slot_is_new)))
+                    end
+                    if slot_is_new then
+                        if verbose then
+                            cprint(COLOR.success, ('  -> dropping tossed item "%s" from slot %d'):format(res.name, index))
+                        end
+                        windower.ffxi.drop_item(index, cur_count)
+                    end
+                else
+                    -- Standard logic: drop units that exceed the snapshot count.
+                    local to_drop = math.max(cur_count - pre_count, 0)
+                    if verbose then
+                        cprint(COLOR.info, ('slot %d: "%s" count=%d snap=%d to_drop=%d whitelisted=%s'):format(
+                            index, res.name, cur_count, pre_count, to_drop, tostring(listed)))
+                    end
+                    if to_drop > 0 and not listed then
+                        if verbose then
+                            cprint(COLOR.success, ('  -> dropping %d of "%s" from slot %d'):format(to_drop, res.name, index))
+                        end
+                        windower.ffxi.drop_item(index, to_drop)
+                    end
                 end
             end
         end
     end
+    if verbose then cprint(COLOR.info, 'Sweep complete.') end
 end
 
 -- ============================================================================
@@ -245,6 +304,7 @@ local function activate()
     hud_show_active()
     local count = 0
     for _ in pairs(snapshot) do count = count + 1 end
+    -- Refresh toss list slot records now that snapshot is taken
     cprint(COLOR.warn, ('ACTIVE. Snapshot taken: %d unique item types on record. New items will be discarded.'):format(count))
     cprint(COLOR.warn, 'Use //trash off to deactivate.')
 end
@@ -291,11 +351,11 @@ windower.register_event('incoming text', function(original, modified, original_m
 
     if not item_name or item_name == '' then return end
 
-    -- Whitelist check: if this item is protected, no sweep needed unless
-    -- other non-whitelisted items also arrived in the same batch.
-    -- The sweep itself also enforces the whitelist, but skipping here avoids
-    -- scheduling a sweep that would do nothing when only kept items are obtained.
-    if is_whitelisted(item_name:lower()) then return end
+    -- Whitelist check: skip sweep if this item is protected and not on the
+    -- toss list. Toss overrides whitelist, so a tossed item always triggers
+    -- a sweep even if it also matches a whitelist term.
+    local name_lower = item_name:lower()
+    if is_whitelisted(name_lower) and not is_tossed(name_lower) then return end
 
     -- Schedule a sweep if one is not already pending. Any additional item
     -- messages that arrive within the 0.5s window are covered automatically
@@ -325,6 +385,15 @@ windower.register_event('addon command', function(cmd, ...)
     elseif cmd == 'off' then
         deactivate()
 
+    elseif cmd == 'debug' then
+        -- Run an immediate verbose sweep to inspect inventory state
+        if not active then
+            cprint(COLOR.warn, 'Trash It is not active - activate first with //trash on.')
+        else
+            cprint(COLOR.info, 'Running debug sweep...')
+            sweep_and_drop(true)
+        end
+
     elseif cmd == 'keep' then
         if #args == 0 then
             cprint(COLOR.warn, 'Usage: //trash keep <term>')
@@ -353,6 +422,45 @@ windower.register_event('addon command', function(cmd, ...)
             cprint(COLOR.success, ('"' .. term .. '" removed from whitelist.'))
         end
 
+    elseif cmd == 'toss' then
+        if #args == 0 then
+            -- //trash toss with no args shows the toss list
+            local items = {}
+            for name in pairs(tosslist) do
+                items[#items + 1] = name
+            end
+            table.sort(items)
+            if #items == 0 then
+                cprint(COLOR.info, 'Toss list is empty.')
+            else
+                cprint(COLOR.header, '--- Toss list (' .. #items .. ' items) ---')
+                for _, name in ipairs(items) do
+                    windower.add_to_chat(COLOR.info, '  ' .. name)
+                end
+            end
+            return
+        end
+        local term = table.concat(args, ' '):lower()
+        if tosslist[term] then
+            cprint(COLOR.info, ('"' .. term .. '" is already on the toss list.'))
+        else
+            tosslist[term] = true
+            cprint(COLOR.success, ('"' .. term .. '" added to toss list (session only). New slots of this item will be discarded.'))
+        end
+
+    elseif cmd == 'untoss' then
+        if #args == 0 then
+            cprint(COLOR.warn, 'Usage: //trash untoss <term>')
+            return
+        end
+        local term = table.concat(args, ' '):lower()
+        if not tosslist[term] then
+            cprint(COLOR.warn, ('"' .. term .. '" is not on the toss list.'))
+        else
+            tosslist[term] = nil
+            cprint(COLOR.success, ('"' .. term .. '" removed from toss list.'))
+        end
+
     elseif cmd == 'list' then
         local items = {}
         for name in pairs(whitelist) do
@@ -379,6 +487,9 @@ windower.register_event('addon command', function(cmd, ...)
         local wl_count = 0
         for _ in pairs(whitelist) do wl_count = wl_count + 1 end
         cprint(COLOR.info, ('Whitelist: %d item(s). Use //trash list to view.'):format(wl_count))
+        local tl_count = 0
+        for _ in pairs(tosslist) do tl_count = tl_count + 1 end
+        cprint(COLOR.info, ('Toss list: %d item(s) (session only). Use //trash toss to view.'):format(tl_count))
 
     elseif cmd == 'help' then
         cprint(COLOR.header, '--- Trash It v' .. _addon.version .. ' ---')
@@ -388,10 +499,15 @@ windower.register_event('addon command', function(cmd, ...)
         windower.add_to_chat(COLOR.info, '  //trash keep <term>     - Add term to whitelist (substring, case-insensitive)')
         windower.add_to_chat(COLOR.info, '  //trash remove <term>   - Remove term from whitelist')
         windower.add_to_chat(COLOR.info, '  //trash list            - Show whitelist')
+        windower.add_to_chat(COLOR.info, '  //trash toss <term>     - Session: discard new slots of item even if already owned')
+        windower.add_to_chat(COLOR.info, '  //trash toss            - Show toss list')
+        windower.add_to_chat(COLOR.info, '  //trash untoss <term>   - Remove term from toss list')
         windower.add_to_chat(COLOR.info, '  //trash status          - Show current state and snapshot info')
+        windower.add_to_chat(COLOR.info, '  //trash debug           - Run a verbose inventory sweep for troubleshooting')
         windower.add_to_chat(COLOR.info, '  //trash help            - Show this help text')
         windower.add_to_chat(COLOR.info, 'SAFETY: Items already in inventory at activation are never touched.')
         windower.add_to_chat(COLOR.info, 'Only newly acquired units are dropped - pre-existing stacks are never touched.')
+        windower.add_to_chat(COLOR.info, 'Toss list (session only) overrides this for non-stackable items by slot.')
 
     else
         cprint(COLOR.warn, 'Unknown command "' .. cmd .. '". Use //trash help.')
@@ -404,6 +520,7 @@ end)
 
 windower.register_event('load', function()
     whitelist = parse_whitelist()
+    tosslist  = {}
     hud_hide()
     local player = windower.ffxi.get_player()
     player_name = player and player.name or nil
