@@ -16,6 +16,13 @@ Medicine Cabinet is a debuff management addon that detects status ailments on yo
 
 ---
 
+## Anticipated updates
+
+- **DEF, Acc, MDEF, Macc, MAB down:** Add language to target these specifics debuffs with a panacea.
+- **Aura detection:** Right now there's a max attempt number to prevent item spam, but I'm working on detecting auras and skipping item use altogether.
+
+---
+
 ## The HUD
 
 A small overlay appears in the top-left corner of your screen (draggable to anywhere you like - position is saved). It has the following states:
