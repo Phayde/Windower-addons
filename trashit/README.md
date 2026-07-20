@@ -2,7 +2,7 @@
 ### A Windower 4 addon for Final Fantasy XI
 
 > **Activate. Farm. Deactivate. Done.**  
-> Automatically discards newly acquired items so your inventory stays clean. Built for Mog Gardening, useful most elsewhere.
+> Automatically discards newly acquired items so your inventory stays clean. Built for Mog Gardening, useful most elsewhere. Currently tested with fishing, mob farming, gardening. Doesn't work with crafting yet, but this will be added in the future.
 
 ---
 
@@ -76,6 +76,7 @@ Trash It is designed with a conservative safety model:
 - Designed and tested for **Mog Gardening**, but works with any item acquisition method: mob farming, fishing, digging, chest drops, etc.
 - HUD is positioned for **1920x1080**. For other resolutions, adjust `HUD_X` at the top of the file using: `HUD_X = math.floor(screen_width / 2) - 140`
 - Compatible with auto-sorter addons - a short delay is applied before each drop to give sorters time to move items to their final slot first.
+- Planned update: Add functionality for crafting.
 
 ---
 
