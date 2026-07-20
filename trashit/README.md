@@ -2,7 +2,7 @@
 ### A Windower 4 addon for Final Fantasy XI
 
 > **Activate. Farm. Deactivate. Done.**  
-> Automatically discards newly acquired items so your inventory stays clean. Built for Mog Gardening, useful anywhere.
+> Automatically discards newly acquired items so your inventory stays clean. Built for Mog Gardening, useful most elsewhere.
 
 ---
 
