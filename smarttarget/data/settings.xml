@@ -22,7 +22,7 @@
     </global>
     <phayde>
         <greylist>sahagin,ghrah,unseelie,slime,shadow,adamantoise,wyvern,agon</greylist>
-        <hp_threshold>90</hp_threshold>
+        <hp_threshold>95</hp_threshold>
         <manual_first_target>true</manual_first_target>
         <whitelist>orc,yagudo,goblin,moblin,weapon,bomb,golem,gigas,snoll,aern,cluster,doomed,hound,hecteyes,leech,ahriman,demon,taurus,gargouille,wasp,damselfly,gnat,ladybug,bat,marid,coeurl,sheep,rarab,soulflayer,ram</whitelist>
     </phayde>
