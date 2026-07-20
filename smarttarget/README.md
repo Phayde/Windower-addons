@@ -1,7 +1,7 @@
 # Smart Target
 ### Smarter auto-targeting for Final Fantasy XI | by Phayde | v1.0.3
 
-> **NOTICE:** A sample `settings.xml` is included with settings optimized for Limbus and segment farming.
+> **NOTICE:** A sample `settings.xml` is included with my personal settings optimized for Limbus and segment farming.
 > If you use it, **replace the character name inside the file with your own** before loading.
 > Delete it entirely to start fresh and a new one will be generated on first load.
 
